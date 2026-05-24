@@ -39,9 +39,9 @@ export default async (req: Request) => {
       prompt: body.prompt,
     })
 
-    await state.addMessage(body.sessionId, 'assistant', result.answer)
+    await state.addMessage(body.sessionId, 'assistant', result.answer.join(' '))
 
-    return json(result)
+    return json({ package: result })
   } catch (error) {
     return textError(error)
   }

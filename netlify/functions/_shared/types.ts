@@ -15,6 +15,13 @@ export type QuizQuestion = {
   correctAnswerIndex: number
 }
 
+export type AssistantResponsePackage = {
+  answer: string[]
+  difficultWords: DifficultWord[]
+  followUpQuestions: string[]
+  quiz: QuizQuestion[]
+}
+
 export type ChatPackage = {
   sourceText: string
   summary: string[]

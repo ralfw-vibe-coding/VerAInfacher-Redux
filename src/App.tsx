@@ -1,19 +1,17 @@
 import {
   ArrowLeft,
-  BookOpenText,
+  Camera,
   Check,
-  ChevronRight,
   FileImage,
-  HelpCircle,
   Loader2,
   MessageCircle,
-  RotateCcw,
+  Save,
   Sparkles,
   Trophy,
   Upload,
   X,
 } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from './components/ui/button'
 import './App.css'
 
@@ -36,11 +34,26 @@ type ChatPackage = {
   quiz: QuizQuestion[]
 }
 
-type ChatMessage = {
+type AssistantResponsePackage = {
+  answer: string[]
+  difficultWords: DifficultWord[]
+  followUpQuestions: string[]
+  quiz: QuizQuestion[]
+}
+
+type UserChatMessage = {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user'
   text: string
 }
+
+type AssistantChatMessage = {
+  id: string
+  role: 'assistant'
+  package: AssistantResponsePackage
+}
+
+type ChatMessage = UserChatMessage | AssistantChatMessage
 
 type StartResponse = {
   sessionId: string
@@ -48,7 +61,7 @@ type StartResponse = {
 }
 
 type ContinueResponse = {
-  answer: string
+  package: AssistantResponsePackage
 }
 
 type UploadImage = {
@@ -58,6 +71,36 @@ type UploadImage = {
 }
 
 type ChoiceKind = 'sentence' | 'word' | 'question'
+type PromptConfigKey =
+  | 'startDeveloperPrompt'
+  | 'startUserPrompt'
+  | 'continueDeveloperPrompt'
+  | 'continueUserPrompt'
+
+type PromptConfigs = Record<PromptConfigKey, string>
+
+const promptConfigFields: Array<{ key: PromptConfigKey; title: string; help: string }> = [
+  {
+    key: 'startDeveloperPrompt',
+    title: 'Start: Developer Prompt',
+    help: 'Grundregeln fuer Texterkennung, Zusammenfassung und Hilfen nach dem Foto-Upload.',
+  },
+  {
+    key: 'startUserPrompt',
+    title: 'Start: User Prompt',
+    help: 'Auftrag fuer den ersten KI-Schritt mit den Bildern.',
+  },
+  {
+    key: 'continueDeveloperPrompt',
+    title: 'Chat: Developer Prompt',
+    help: 'Grundregeln fuer jede weitere Antwort im Chat.',
+  },
+  {
+    key: 'continueUserPrompt',
+    title: 'Chat: User Prompt',
+    help: 'Template fuer Folgefragen. Platzhalter: {{sourceText}}, {{initialSummary}}, {{history}}, {{prompt}}.',
+  },
+]
 
 const MAX_IMAGE_EDGE = 1400
 const JPEG_QUALITY = 0.78
@@ -113,8 +156,23 @@ function promptForChoice(kind: ChoiceKind, value: string) {
   return `Beantworte mir diese Frage: ${value}`
 }
 
+function packageFromInitial(chatPackage: ChatPackage): AssistantResponsePackage {
+  return {
+    answer: chatPackage.summary,
+    difficultWords: chatPackage.difficultWords,
+    followUpQuestions: chatPackage.followUpQuestions,
+    quiz: chatPackage.quiz,
+  }
+}
+
 function App() {
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  return window.location.pathname === '/prompts' ? <PromptsPage /> : <ChatApp />
+}
+
+function ChatApp() {
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const uploadInputRef = useRef<HTMLInputElement>(null)
+  const latestMessageRef = useRef<HTMLElement>(null)
   const [images, setImages] = useState<UploadImage[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [chatPackage, setChatPackage] = useState<ChatPackage | null>(null)
@@ -124,16 +182,17 @@ function App() {
   const [quizOpen, setQuizOpen] = useState(false)
   const [quizIndex, setQuizIndex] = useState(0)
   const [quizAnswers, setQuizAnswers] = useState<number[]>([])
+  const [activeQuiz, setActiveQuiz] = useState<QuizQuestion[]>([])
 
   const canStart = images.length > 0 && !busyLabel
   const score = useMemo(
     () =>
-      chatPackage?.quiz.reduce(
+      activeQuiz.reduce(
         (total, question, index) =>
           quizAnswers[index] === question.correctAnswerIndex ? total + 1 : total,
         0,
-      ) ?? 0,
-    [chatPackage, quizAnswers],
+      ),
+    [activeQuiz, quizAnswers],
   )
 
   async function handleFiles(files: FileList | null) {
@@ -152,7 +211,8 @@ function App() {
       setError(caught instanceof Error ? caught.message : 'Die Bilder konnten nicht gelesen werden.')
     } finally {
       setBusyLabel('')
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      if (cameraInputRef.current) cameraInputRef.current.value = ''
+      if (uploadInputRef.current) uploadInputRef.current.value = ''
     }
   }
 
@@ -177,7 +237,7 @@ function App() {
         {
           id: makeId(),
           role: 'assistant',
-          text: data.package.summary.join(' '),
+          package: packageFromInitial(data.package),
         },
       ])
     } catch (caught) {
@@ -208,7 +268,7 @@ function App() {
       const data = (await response.json()) as ContinueResponse
       setMessages((current) => [
         ...current,
-        { id: makeId(), role: 'assistant', text: data.answer },
+        { id: makeId(), role: 'assistant', package: data.package },
       ])
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Die Antwort konnte nicht erzeugt werden.')
@@ -226,6 +286,7 @@ function App() {
     setQuizOpen(false)
     setQuizIndex(0)
     setQuizAnswers([])
+    setActiveQuiz([])
   }
 
   function answerQuiz(answerIndex: number) {
@@ -234,8 +295,24 @@ function App() {
     setQuizAnswers(nextAnswers)
   }
 
-  const currentQuiz = chatPackage?.quiz[quizIndex]
-  const quizDone = Boolean(chatPackage && quizAnswers.length === chatPackage.quiz.length)
+  function openQuiz(quiz: QuizQuestion[]) {
+    setActiveQuiz(quiz)
+    setQuizIndex(0)
+    setQuizAnswers([])
+    setQuizOpen(true)
+  }
+
+  const currentQuiz = activeQuiz[quizIndex]
+  const quizDone = activeQuiz.length > 0 && quizAnswers.length === activeQuiz.length
+
+  useEffect(() => {
+    if (!chatPackage || messages.length === 0) return
+
+    latestMessageRef.current?.scrollIntoView({
+      block: 'start',
+      behavior: 'smooth',
+    })
+  }, [busyLabel, chatPackage, messages.length])
 
   return (
     <main className="app-shell">
@@ -244,12 +321,12 @@ function App() {
           <Sparkles size={26} />
         </div>
         <div>
-          <p className="eyebrow">Vair+</p>
           <h1>VerAInfacher Redux</h1>
+          <p className="claim">Fotografieren. Fragen. Verstehen. Ganz einfach!</p>
         </div>
         {chatPackage ? (
-          <Button className="icon-button" onClick={resetChat} aria-label="Neu starten">
-            <RotateCcw size={24} />
+          <Button className="new-chat-button" onClick={resetChat}>
+            Neuer Chat
           </Button>
         ) : null}
       </header>
@@ -257,29 +334,31 @@ function App() {
       <section className="workspace">
         {!chatPackage ? (
           <div className="upload-panel">
-            <div className="upload-copy">
-              <BookOpenText size={42} aria-hidden="true" />
-              <h2>Text fotografieren. Bild hochladen. Einfach verstehen.</h2>
-              <p>Du kannst ein oder mehrere Fotos auswählen. Vair+ liest den Text und erklärt ihn in sehr einfacher Sprache.</p>
-            </div>
+            <input
+              ref={cameraInputRef}
+              className="file-input-hidden"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) => void handleFiles(event.target.files)}
+            />
 
             <input
-              ref={fileInputRef}
-              className="visually-hidden"
+              ref={uploadInputRef}
+              className="file-input-hidden"
               type="file"
               accept="image/*"
               multiple
               onChange={(event) => void handleFiles(event.target.files)}
             />
 
-            <div className="upload-actions">
-              <Button className="primary-button" onClick={() => fileInputRef.current?.click()}>
-                <Upload size={24} />
-                Fotos auswählen
+            <div className="capture-actions" aria-label="Fotos aufnehmen oder hochladen">
+              <Button className="camera-button" onClick={() => cameraInputRef.current?.click()} aria-label="Foto machen">
+                <Camera size={52} />
               </Button>
-              <Button className="secondary-button" onClick={startChat} disabled={!canStart}>
-                <MessageCircle size={24} />
-                Text verstehen
+              <Button className="upload-round-button" onClick={() => uploadInputRef.current?.click()} aria-label="Bild hochladen">
+                <Upload size={46} />
+                <span>Bild hochladen</span>
               </Button>
             </div>
 
@@ -300,13 +379,74 @@ function App() {
                 ))}
               </ul>
             ) : null}
+
+            <Button className="start-chat-button" onClick={startChat} disabled={!canStart}>
+              <MessageCircle size={26} />
+              Chat starten
+            </Button>
           </div>
         ) : (
           <div className="chat-layout">
             <section className="messages" aria-label="Chat">
-              {messages.map((message) => (
-                <article className={`message ${message.role}`} key={message.id}>
-                  <p>{message.text}</p>
+              {messages.map((message, index) => (
+                <article
+                  className={`message ${message.role}${message.role === 'assistant' ? ' interactive-answer' : ''}`}
+                  key={message.id}
+                  ref={index === messages.length - 1 ? latestMessageRef : undefined}
+                >
+                  {message.role === 'user' ? (
+                    <p>{message.text}</p>
+                  ) : (
+                    <>
+                      <div className="summary-list" aria-label="Antwort">
+                        {message.package.answer.map((sentence) => (
+                          <Button
+                            className="summary-sentence"
+                            key={sentence}
+                            onClick={() => void askChoice('sentence', sentence)}
+                          >
+                            {sentence}
+                          </Button>
+                        ))}
+                      </div>
+
+                      <section className="answer-section">
+                        <h2>Erkläre mir das:</h2>
+                        <div className="word-chips">
+                          {message.package.difficultWords.map((item) => (
+                            <Button
+                              className="word-chip"
+                              key={`${message.id}-${item.word}`}
+                              onClick={() => void askChoice('word', item.word)}
+                            >
+                              {item.word}
+                            </Button>
+                          ))}
+                        </div>
+                      </section>
+
+                      <section className="answer-section">
+                        <h2>Ich will wissen:</h2>
+                        <ul className="question-list">
+                          {message.package.followUpQuestions.map((question) => (
+                            <li key={`${message.id}-${question}`}>
+                              <Button
+                                className="question-link"
+                                onClick={() => void askChoice('question', question)}
+                              >
+                                {question}
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+
+                      <Button className="quiz-button inline-quiz-button" onClick={() => openQuiz(message.package.quiz)}>
+                        <Trophy size={24} />
+                        Quizfragen
+                      </Button>
+                    </>
+                  )}
                 </article>
               ))}
               {busyLabel ? (
@@ -316,61 +456,6 @@ function App() {
                 </article>
               ) : null}
             </section>
-
-            <aside className="choice-panel" aria-label="Auswahl">
-              <section>
-                <h2>Sätze</h2>
-                <div className="choice-stack">
-                  {chatPackage.summary.map((sentence) => (
-                    <Button
-                      className="choice-button"
-                      key={sentence}
-                      onClick={() => void askChoice('sentence', sentence)}
-                    >
-                      <span>{sentence}</span>
-                      <ChevronRight size={22} />
-                    </Button>
-                  ))}
-                </div>
-              </section>
-
-              <section>
-                <h2>Schwere Wörter</h2>
-                <div className="word-grid">
-                  {chatPackage.difficultWords.map((item) => (
-                    <Button
-                      className="word-button"
-                      key={item.word}
-                      onClick={() => void askChoice('word', item.word)}
-                    >
-                      <strong>{item.word}</strong>
-                      <span>{item.shortExplanation}</span>
-                    </Button>
-                  ))}
-                </div>
-              </section>
-
-              <section>
-                <h2>Fragen</h2>
-                <div className="choice-stack">
-                  {chatPackage.followUpQuestions.map((question) => (
-                    <Button
-                      className="choice-button"
-                      key={question}
-                      onClick={() => void askChoice('question', question)}
-                    >
-                      <HelpCircle size={24} />
-                      <span>{question}</span>
-                    </Button>
-                  ))}
-                </div>
-              </section>
-
-              <Button className="quiz-button" onClick={() => setQuizOpen(true)}>
-                <Trophy size={24} />
-                Quiz starten
-              </Button>
-            </aside>
           </div>
         )}
       </section>
@@ -384,7 +469,7 @@ function App() {
         </div>
       ) : null}
 
-      {quizOpen && chatPackage && currentQuiz ? (
+      {quizOpen && currentQuiz ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quiz">
           <div className="quiz-modal">
             <div className="quiz-header">
@@ -398,7 +483,7 @@ function App() {
               >
                 <ArrowLeft size={24} />
               </Button>
-              <p>Frage {quizIndex + 1} von {chatPackage.quiz.length}</p>
+              <p>Frage {quizIndex + 1} von {activeQuiz.length}</p>
               <Button className="icon-button" onClick={() => setQuizOpen(false)} aria-label="Schließen">
                 <X size={24} />
               </Button>
@@ -423,17 +508,17 @@ function App() {
                   className="primary-button full-width"
                   disabled={quizAnswers[quizIndex] === undefined}
                   onClick={() => {
-                    if (quizIndex < chatPackage.quiz.length - 1) setQuizIndex((current) => current + 1)
+                    if (quizIndex < activeQuiz.length - 1) setQuizIndex((current) => current + 1)
                     else setQuizAnswers((current) => [...current])
                   }}
                 >
-                  {quizIndex < chatPackage.quiz.length - 1 ? 'Weiter' : 'Auswerten'}
+                  {quizIndex < activeQuiz.length - 1 ? 'Weiter' : 'Auswerten'}
                 </Button>
               </>
             ) : (
               <div className="quiz-result">
                 <Trophy size={54} />
-                <h2>{score} von {chatPackage.quiz.length} richtig</h2>
+                <h2>{score} von {activeQuiz.length} richtig</h2>
                 <p>Gut gemacht. Du hast dich mit dem Text beschäftigt.</p>
                 <Button
                   className="primary-button full-width"
@@ -454,3 +539,111 @@ function App() {
 }
 
 export default App
+
+function PromptsPage() {
+  const [prompts, setPrompts] = useState<PromptConfigs | null>(null)
+  const [busyLabel, setBusyLabel] = useState('Prompts werden geladen')
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadPrompts() {
+      try {
+        const response = await fetch('/api/prompts')
+        if (!response.ok) throw new Error(await response.text())
+        const data = (await response.json()) as { prompts: PromptConfigs }
+        if (isMounted) {
+          setPrompts(data.prompts)
+          setError('')
+        }
+      } catch (caught) {
+        if (isMounted) {
+          setError(caught instanceof Error ? caught.message : 'Die Prompts konnten nicht geladen werden.')
+        }
+      } finally {
+        if (isMounted) setBusyLabel('')
+      }
+    }
+
+    void loadPrompts()
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  async function savePrompts() {
+    if (!prompts) return
+
+    setBusyLabel('Prompts werden gespeichert')
+    setStatus('')
+    setError('')
+
+    try {
+      const response = await fetch('/api/prompts', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompts }),
+      })
+
+      if (!response.ok) throw new Error(await response.text())
+
+      const data = (await response.json()) as { prompts: PromptConfigs }
+      setPrompts(data.prompts)
+      setStatus('Prompts gespeichert.')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Die Prompts konnten nicht gespeichert werden.')
+    } finally {
+      setBusyLabel('')
+    }
+  }
+
+  return (
+    <main className="app-shell prompt-admin-shell">
+      <header className="top-bar">
+        <div className="brand-mark" aria-hidden="true">
+          <Sparkles size={26} />
+        </div>
+        <div>
+          <h1>Prompts</h1>
+          <p className="claim">KI-Schritte ansehen, ändern und speichern.</p>
+        </div>
+        <Button className="new-chat-button" onClick={() => window.location.assign('/')}>
+          Chat
+        </Button>
+      </header>
+
+      <section className="prompt-admin">
+        {prompts ? (
+          <div className="prompt-grid">
+            {promptConfigFields.map((field) => (
+              <label className="prompt-field" key={field.key}>
+                <span>{field.title}</span>
+                <small>{field.help}</small>
+                <textarea
+                  value={prompts[field.key]}
+                  onChange={(event) =>
+                    setPrompts((current) =>
+                      current ? { ...current, [field.key]: event.target.value } : current,
+                    )
+                  }
+                />
+              </label>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="prompt-actions">
+          <Button className="primary-button" onClick={() => void savePrompts()} disabled={!prompts || Boolean(busyLabel)}>
+            {busyLabel ? <Loader2 className="spin" size={22} /> : <Save size={22} />}
+            Speichern
+          </Button>
+          {busyLabel ? <p>{busyLabel}</p> : null}
+          {status ? <p className="status-text">{status}</p> : null}
+          {error ? <p className="prompt-error">{error}</p> : null}
+        </div>
+      </section>
+    </main>
+  )
+}

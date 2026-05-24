@@ -1,6 +1,7 @@
 import OpenAI from 'openai'
 import { getEnv, requireEnv } from './env'
-import type { ChatPackage, UploadImage } from './types'
+import { getStateProvider } from './state'
+import type { AssistantResponsePackage, ChatPackage, UploadImage } from './types'
 
 const MODEL = getEnv('OPENAI_MODEL') ?? 'gpt-4.1-mini'
 
@@ -59,12 +60,20 @@ const chatPackageSchema = {
   },
 } as const
 
-const answerSchema = {
+const responsePackageSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['answer'],
+  required: ['answer', 'difficultWords', 'followUpQuestions', 'quiz'],
   properties: {
-    answer: { type: 'string' },
+    answer: {
+      type: 'array',
+      minItems: 3,
+      maxItems: 8,
+      items: { type: 'string' },
+    },
+    difficultWords: chatPackageSchema.properties.difficultWords,
+    followUpQuestions: chatPackageSchema.properties.followUpQuestions,
+    quiz: chatPackageSchema.properties.quiz,
   },
 } as const
 
@@ -73,21 +82,20 @@ function client() {
 }
 
 export async function createInitialPackage(images: UploadImage[]): Promise<ChatPackage> {
+  const prompts = await getStateProvider().getPromptConfigs()
   const response = await client().responses.create({
     model: MODEL,
     input: [
       {
         role: 'developer',
-        content:
-          'Du bist Vair+. Du hilfst Menschen mit kognitiven Einschränkungen. Lies den Text auf den Bildern. Antworte auf Deutsch. Schreibe sehr einfache Sprache. Schreibe kurze Sätze. Vermeide Nebensätze. Bewahre wichtige Fakten. Erfinde nichts.',
+        content: prompts.startDeveloperPrompt,
       },
       {
         role: 'user',
         content: [
           {
             type: 'input_text',
-            text:
-              'Erkenne den Text auf diesen Bildern. Fasse ihn danach sehr einfach zusammen. Erzeuge schwere Wörter, Folgefragen und ein Quiz. Jede Quizfrage hat 3 Antworten. Genau eine Antwort ist richtig. Zwei Antworten sind lustig und offensichtlich falsch.',
+            text: prompts.startUserPrompt,
           },
           ...images.map((image) => ({
             type: 'input_image' as const,
@@ -115,26 +123,26 @@ export async function createFollowUpAnswer(input: {
   initialPackage: ChatPackage
   history: Array<{ role: 'user' | 'assistant'; content: string }>
   prompt: string
-}) {
+}): Promise<AssistantResponsePackage> {
+  const prompts = await getStateProvider().getPromptConfigs()
   const response = await client().responses.create({
     model: MODEL,
     input: [
       {
         role: 'developer',
-        content:
-          'Du bist Vair+. Antworte auf Deutsch. Nutze sehr einfache Sprache. Schreibe kurze Sätze. Vermeide Nebensätze. Erkläre freundlich und erwachsen. Bleibe beim Ausgangstext.',
+        content: prompts.continueDeveloperPrompt,
       },
       {
         role: 'user',
         content: [
           {
             type: 'input_text',
-            text: [
-              `Ausgangstext:\n${input.sourceText}`,
-              `Erste Zusammenfassung:\n${input.initialPackage.summary.join(' ')}`,
-              `Bisheriger Chat:\n${input.history.map((message) => `${message.role}: ${message.content}`).join('\n')}`,
-              `Neue Anfrage:\n${input.prompt}`,
-            ].join('\n\n'),
+            text: interpolatePrompt(prompts.continueUserPrompt, {
+              sourceText: input.sourceText,
+              initialSummary: input.initialPackage.summary.join(' '),
+              history: input.history.map((message) => `${message.role}: ${message.content}`).join('\n'),
+              prompt: input.prompt,
+            }),
           },
         ],
       },
@@ -142,12 +150,16 @@ export async function createFollowUpAnswer(input: {
     text: {
       format: {
         type: 'json_schema',
-        name: 'vair_follow_up_answer',
+        name: 'vair_follow_up_package',
         strict: true,
-        schema: answerSchema,
+        schema: responsePackageSchema,
       },
     },
   })
 
-  return JSON.parse(response.output_text) as { answer: string }
+  return JSON.parse(response.output_text) as AssistantResponsePackage
+}
+
+function interpolatePrompt(template: string, values: Record<string, string>) {
+  return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => values[key] ?? '')
 }

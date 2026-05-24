@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { getEnv, requireEnv } from './env'
+import { defaultPromptConfigs, promptConfigKeys, type PromptConfigs } from './prompt-configs'
 import type { ChatPackage } from './types'
 
 type StoredMessage = {
@@ -23,6 +24,8 @@ type StateProvider = {
   getSession(sessionId: string): Promise<StoredSession | undefined>
   getMessages(sessionId: string): Promise<StoredMessage[]>
   addMessage(sessionId: string, role: 'user' | 'assistant', content: string): Promise<void>
+  getPromptConfigs(): Promise<PromptConfigs>
+  savePromptConfigs(prompts: PromptConfigs): Promise<void>
 }
 
 let provider: StateProvider | undefined
@@ -85,13 +88,13 @@ class PostgresStateProvider implements StateProvider {
       )
     `
 
-    await query`
-      insert into prompt_configs (key, value)
-      values
-        ('initial_package', 'Extrahiere den Text aus Bildern. Erkläre ihn in sehr einfacher Sprache. Nutze kurze Sätze. Nutze fast keine Nebensätze.'),
-        ('continue_chat', 'Antworte in sehr einfacher Sprache. Nutze kurze Sätze. Bleibe beim Ausgangstext.')
-      on conflict (key) do nothing
-    `
+    for (const key of promptConfigKeys) {
+      await query`
+        insert into prompt_configs (key, value)
+        values (${key}, ${defaultPromptConfigs[key]})
+        on conflict (key) do nothing
+      `
+    }
 
     this.didInit = true
   }
@@ -161,6 +164,41 @@ class PostgresStateProvider implements StateProvider {
       values (${sessionId}, ${role}, ${content})
     `
   }
+
+  async getPromptConfigs() {
+    await this.ensureSchema()
+    const query = this.sql()
+    const rows = await query`
+      select key, value
+      from prompt_configs
+      where key = any(${promptConfigKeys})
+    `
+    const prompts = { ...defaultPromptConfigs }
+
+    for (const row of rows) {
+      const key = String(row.key)
+      if (isPromptConfigKey(key)) {
+        prompts[key] = String(row.value)
+      }
+    }
+
+    return prompts
+  }
+
+  async savePromptConfigs(prompts: PromptConfigs) {
+    await this.ensureSchema()
+    const query = this.sql()
+
+    for (const key of promptConfigKeys) {
+      await query`
+        insert into prompt_configs (key, value, updated_at)
+        values (${key}, ${prompts[key]}, now())
+        on conflict (key) do update set
+          value = excluded.value,
+          updated_at = now()
+      `
+    }
+  }
 }
 
 class FileSystemStateProvider implements StateProvider {
@@ -221,8 +259,27 @@ class FileSystemStateProvider implements StateProvider {
     await this.writeSession(session)
   }
 
+  async getPromptConfigs() {
+    await this.ensureRoot()
+    const raw = await readFile(this.promptConfigPath(), 'utf8')
+    const savedPrompts = JSON.parse(raw) as Partial<PromptConfigs>
+
+    return {
+      ...defaultPromptConfigs,
+      ...Object.fromEntries(
+        promptConfigKeys.map((key) => [key, savedPrompts[key] ?? defaultPromptConfigs[key]]),
+      ),
+    } as PromptConfigs
+  }
+
+  async savePromptConfigs(prompts: PromptConfigs) {
+    await this.ensureRoot()
+    await writeFile(this.promptConfigPath(), `${JSON.stringify(prompts, null, 2)}\n`, 'utf8')
+  }
+
   private async ensureRoot() {
     await mkdir(this.rootPath, { recursive: true })
+    await this.ensurePromptConfig()
   }
 
   private sessionPath(sessionId: string) {
@@ -232,4 +289,28 @@ class FileSystemStateProvider implements StateProvider {
   private async writeSession(session: StoredSession) {
     await writeFile(this.sessionPath(session.id), `${JSON.stringify(session, null, 2)}\n`, 'utf8')
   }
+
+  private async ensurePromptConfig() {
+    try {
+      await readFile(this.promptConfigPath(), 'utf8')
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+        throw error
+      }
+
+      await writeFile(
+        this.promptConfigPath(),
+        `${JSON.stringify(defaultPromptConfigs, null, 2)}\n`,
+        'utf8',
+      )
+    }
+  }
+
+  private promptConfigPath() {
+    return join(this.rootPath, 'prompt-configs.json')
+  }
+}
+
+function isPromptConfigKey(key: string): key is keyof PromptConfigs {
+  return promptConfigKeys.includes(key as keyof PromptConfigs)
 }

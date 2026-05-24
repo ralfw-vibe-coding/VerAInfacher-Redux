@@ -40,11 +40,32 @@ OPENAI_MODEL="gpt-4.1-mini"
 
 ```bash
 npm install
-npx netlify dev
+./run.sh
 ```
 
 Die App läuft dann über Netlify Dev, damit `/api/start-chat` und
 `/api/continue-chat` verfügbar sind.
+
+Prompt-Verwaltung:
+
+```text
+http://localhost:8888/prompts
+```
+
+Dort können diese vier Prompts bearbeitet und gespeichert werden:
+
+- Start: Developer Prompt
+- Start: User Prompt
+- Chat: Developer Prompt
+- Chat: User Prompt
+
+Teilstarts:
+
+```bash
+./run.sh --client
+./run.sh --server
+./run.sh --client --server
+```
 
 ## Persistenz
 

@@ -26,6 +26,11 @@ type QuizQuestion = {
   correctAnswerIndex: number
 }
 
+type ActiveQuiz = {
+  originalQuestions: QuizQuestion[]
+  questions: QuizQuestion[]
+}
+
 type ChatPackage = {
   sourceText: string
   summary: string[]
@@ -104,6 +109,7 @@ const promptConfigFields: Array<{ key: PromptConfigKey; title: string; help: str
 
 const MAX_IMAGE_EDGE = 1400
 const JPEG_QUALITY = 0.78
+const confettiPieces = Array.from({ length: 42 }, (_, index) => index)
 
 function makeId() {
   return crypto.randomUUID()
@@ -165,6 +171,28 @@ function packageFromInitial(chatPackage: ChatPackage): AssistantResponsePackage 
   }
 }
 
+function shuffleQuizAnswers(quiz: QuizQuestion[]) {
+  return quiz.map((question) => {
+    const answers = question.answers.map((answer, index) => ({
+      answer,
+      wasCorrect: index === question.correctAnswerIndex,
+    }))
+
+    for (let index = answers.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1))
+      const current = answers[index]
+      answers[index] = answers[swapIndex]
+      answers[swapIndex] = current
+    }
+
+    return {
+      ...question,
+      answers: answers.map((item) => item.answer),
+      correctAnswerIndex: answers.findIndex((item) => item.wasCorrect),
+    }
+  })
+}
+
 function App() {
   return window.location.pathname === '/prompts' ? <PromptsPage /> : <ChatApp />
 }
@@ -182,12 +210,12 @@ function ChatApp() {
   const [quizOpen, setQuizOpen] = useState(false)
   const [quizIndex, setQuizIndex] = useState(0)
   const [quizAnswers, setQuizAnswers] = useState<number[]>([])
-  const [activeQuiz, setActiveQuiz] = useState<QuizQuestion[]>([])
+  const [activeQuiz, setActiveQuiz] = useState<ActiveQuiz>({ originalQuestions: [], questions: [] })
 
   const canStart = images.length > 0 && !busyLabel
   const score = useMemo(
     () =>
-      activeQuiz.reduce(
+      activeQuiz.questions.reduce(
         (total, question, index) =>
           quizAnswers[index] === question.correctAnswerIndex ? total + 1 : total,
         0,
@@ -286,7 +314,7 @@ function ChatApp() {
     setQuizOpen(false)
     setQuizIndex(0)
     setQuizAnswers([])
-    setActiveQuiz([])
+    setActiveQuiz({ originalQuestions: [], questions: [] })
   }
 
   function answerQuiz(answerIndex: number) {
@@ -296,15 +324,27 @@ function ChatApp() {
   }
 
   function openQuiz(quiz: QuizQuestion[]) {
-    setActiveQuiz(quiz)
+    setActiveQuiz({
+      originalQuestions: quiz,
+      questions: shuffleQuizAnswers(quiz),
+    })
     setQuizIndex(0)
     setQuizAnswers([])
     setQuizOpen(true)
   }
 
-  const currentQuiz = activeQuiz[quizIndex]
-  const answeredQuizCount = activeQuiz.filter((_, index) => quizAnswers[index] !== undefined).length
-  const quizDone = activeQuiz.length > 0 && answeredQuizCount === activeQuiz.length
+  function restartQuiz() {
+    setActiveQuiz((current) => ({
+      originalQuestions: current.originalQuestions,
+      questions: shuffleQuizAnswers(current.originalQuestions),
+    }))
+    setQuizAnswers([])
+    setQuizIndex(0)
+  }
+
+  const currentQuiz = activeQuiz.questions[quizIndex]
+  const answeredQuizCount = activeQuiz.questions.filter((_, index) => quizAnswers[index] !== undefined).length
+  const quizDone = activeQuiz.questions.length > 0 && answeredQuizCount === activeQuiz.questions.length
 
   useEffect(() => {
     if (!chatPackage || messages.length === 0) return
@@ -470,21 +510,39 @@ function ChatApp() {
         </div>
       ) : null}
 
-      {quizOpen && currentQuiz ? (
+      {quizOpen && (currentQuiz || quizDone) ? (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Quiz">
+          {quizDone ? (
+            <div className="confetti-rain" aria-hidden="true">
+              {confettiPieces.map((piece) => (
+                <span
+                  key={piece}
+                  style={{
+                    left: `${(piece * 37) % 100}%`,
+                    animationDelay: `${(piece % 14) * 0.12}s`,
+                    animationDuration: `${2.2 + (piece % 7) * 0.18}s`,
+                  }}
+                />
+              ))}
+            </div>
+          ) : null}
           <div className="quiz-modal">
             <div className="quiz-header">
-              <Button
-                className="icon-button"
-                onClick={() => {
-                  if (quizIndex === 0) setQuizOpen(false)
-                  else setQuizIndex((current) => current - 1)
-                }}
-                aria-label={quizIndex === 0 ? 'Quiz schließen' : 'Zurück'}
-              >
-                <ArrowLeft size={24} />
-              </Button>
-              <p>Frage {quizIndex + 1} von {activeQuiz.length}</p>
+              {!quizDone ? (
+                <Button
+                  className="icon-button"
+                  onClick={() => {
+                    if (quizIndex === 0) setQuizOpen(false)
+                    else setQuizIndex((current) => current - 1)
+                  }}
+                  aria-label={quizIndex === 0 ? 'Quiz schließen' : 'Zurück'}
+                >
+                  <ArrowLeft size={24} />
+                </Button>
+              ) : (
+                <span />
+              )}
+              <p>{quizDone ? 'Quiz-Ergebnis' : `Frage ${quizIndex + 1} von ${activeQuiz.questions.length}`}</p>
               <Button className="icon-button" onClick={() => setQuizOpen(false)} aria-label="Schließen">
                 <X size={24} />
               </Button>
@@ -509,26 +567,47 @@ function ChatApp() {
                   className="primary-button full-width"
                   disabled={quizAnswers[quizIndex] === undefined}
                   onClick={() => {
-                    if (quizIndex < activeQuiz.length - 1) {
+                    if (quizIndex < activeQuiz.questions.length - 1) {
                       setQuizIndex((current) => current + 1)
                     } else {
                       setQuizAnswers((current) => [...current])
                     }
                   }}
                 >
-                  {quizIndex < activeQuiz.length - 1 ? 'Weiter' : 'Auswerten'}
+                  {quizIndex < activeQuiz.questions.length - 1 ? 'Weiter' : 'Auswerten'}
                 </Button>
               </>
             ) : (
               <div className="quiz-result">
                 <Trophy size={54} />
-                <h2>{score} von {activeQuiz.length} richtig</h2>
-                <p>Gut gemacht. Du hast dich mit dem Text beschäftigt.</p>
+                <h2>{score} von {activeQuiz.questions.length} richtig</h2>
+                <div className="quiz-review-list" aria-label="Quiz-Auswertung">
+                  {activeQuiz.questions.map((question, index) => {
+                    const selectedAnswerIndex = quizAnswers[index]
+                    const selectedAnswer =
+                      selectedAnswerIndex === undefined ? 'Keine Antwort' : question.answers[selectedAnswerIndex]
+                    const correctAnswer = question.answers[question.correctAnswerIndex]
+                    const isCorrect = selectedAnswerIndex === question.correctAnswerIndex
+
+                    return (
+                      <section className={`quiz-review-item ${isCorrect ? 'correct' : 'wrong'}`} key={`${question.question}-${index}`}>
+                        <h3>{question.question}</h3>
+                        <p className={isCorrect ? 'answer-correct-text' : 'answer-wrong-text'}>
+                          <strong>Deine Antwort:</strong> {selectedAnswer}
+                        </p>
+                        {!isCorrect ? (
+                          <p className="answer-correct-text">
+                            <strong>Richtig ist:</strong> {correctAnswer}
+                          </p>
+                        ) : null}
+                      </section>
+                    )
+                  })}
+                </div>
                 <Button
                   className="primary-button full-width"
                   onClick={() => {
-                    setQuizAnswers([])
-                    setQuizIndex(0)
+                    restartQuiz()
                   }}
                 >
                   Noch einmal spielen

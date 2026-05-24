@@ -23,7 +23,7 @@ export const defaultPromptConfigs: PromptConfigs = {
     followUpQuestionRules,
   ].join('\n\n'),
   startUserPrompt:
-    'Erkenne den Text auf diesen Bildern. Fasse ihn danach sehr einfach zusammen. Erzeuge schwere Woerter, Folgefragen und ein Quiz. Jede Quizfrage hat 3 Antworten. Genau eine Antwort ist richtig. Zwei Antworten sind lustig und offensichtlich falsch.',
+    'Erkenne den Text auf diesen Bildern. Fasse ihn danach sehr einfach zusammen. Erzeuge schwere Woerter, Folgefragen und ein Quiz. Jede Quizfrage hat mehrere Antworten. Genau eine Antwort ist richtig. Die anderen Antworten sind lustig und offensichtlich falsch.',
   continueDeveloperPrompt: [
     'Du bist Vair+. Antworte auf Deutsch. Nutze sehr einfache Sprache. Schreibe kurze Saetze. Vermeide Nebensaetze. Erklaere freundlich und erwachsen. Bleibe beim Ausgangstext. Gib immer ein vollstaendiges Antwortpaket zurueck: Antwortsaetze, schwere Woerter, Folgefragen und Quiz.',
     followUpQuestionRules,
@@ -41,7 +41,7 @@ export const defaultPromptConfigs: PromptConfigs = {
     'Neue Anfrage:',
     '{{prompt}}',
     '',
-    'Erzeuge zur Antwort 5 schwere Woerter, 3 Folgefragen und 3 Quizfragen. Jede Quizfrage hat 3 Antworten. Genau eine Antwort ist richtig. Zwei Antworten sind lustig und offensichtlich falsch.',
+    'Erzeuge zur Antwort 5 schwere Woerter, 3 Folgefragen und ein Quiz. Jede Quizfrage hat mehrere Antworten. Genau eine Antwort ist richtig. Die anderen Antworten sind lustig und offensichtlich falsch.',
   ].join('\n'),
 }
 

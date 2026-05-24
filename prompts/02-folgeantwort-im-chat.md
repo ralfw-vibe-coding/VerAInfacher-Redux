@@ -42,7 +42,7 @@ Bisheriger Chat:
 Neue Anfrage:
 <angeklickter Satz, angeklicktes Wort oder angeklickte Folgefrage>
 
-Erzeuge zur Antwort 5 schwere Woerter, 3 Folgefragen und 3 Quizfragen. Jede Quizfrage hat 3 Antworten. Genau eine Antwort ist richtig. Zwei Antworten sind lustig und offensichtlich falsch.
+Erzeuge zur Antwort 5 schwere Woerter, 3 Folgefragen und ein Quiz. Jede Quizfrage hat mehrere Antworten. Genau eine Antwort ist richtig. Die anderen Antworten sind lustig und offensichtlich falsch.
 ```
 
 ## Beispiele fuer neue Anfragen
@@ -82,7 +82,7 @@ Beantworte mir diese Frage: <angeklickte Folgefrage>
   "quiz": [
     {
       "question": "Quizfrage",
-      "answers": ["richtige Antwort", "lustig falsch", "lustig falsch"],
+      "answers": ["richtige Antwort", "lustig falsch"],
       "correctAnswerIndex": 0
     }
   ]

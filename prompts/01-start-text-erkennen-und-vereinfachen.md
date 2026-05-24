@@ -28,7 +28,7 @@ Regeln fuer Folgefragen:
 ## User Prompt
 
 ```text
-Erkenne den Text auf diesen Bildern. Fasse ihn danach sehr einfach zusammen. Erzeuge schwere Woerter, Folgefragen und ein Quiz. Jede Quizfrage hat 3 Antworten. Genau eine Antwort ist richtig. Zwei Antworten sind lustig und offensichtlich falsch.
+Erkenne den Text auf diesen Bildern. Fasse ihn danach sehr einfach zusammen. Erzeuge schwere Woerter, Folgefragen und ein Quiz. Jede Quizfrage hat mehrere Antworten. Genau eine Antwort ist richtig. Die anderen Antworten sind lustig und offensichtlich falsch.
 ```
 
 ## Erwartete Antwortstruktur
@@ -49,7 +49,7 @@ Erkenne den Text auf diesen Bildern. Fasse ihn danach sehr einfach zusammen. Erz
   "quiz": [
     {
       "question": "Quizfrage",
-      "answers": ["richtige Antwort", "lustig falsch", "lustig falsch"],
+      "answers": ["richtige Antwort", "lustig falsch"],
       "correctAnswerIndex": 0
     }
   ]

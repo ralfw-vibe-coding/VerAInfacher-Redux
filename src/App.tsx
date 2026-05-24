@@ -303,7 +303,8 @@ function ChatApp() {
   }
 
   const currentQuiz = activeQuiz[quizIndex]
-  const quizDone = activeQuiz.length > 0 && quizAnswers.length === activeQuiz.length
+  const answeredQuizCount = activeQuiz.filter((_, index) => quizAnswers[index] !== undefined).length
+  const quizDone = activeQuiz.length > 0 && answeredQuizCount === activeQuiz.length
 
   useEffect(() => {
     if (!chatPackage || messages.length === 0) return
@@ -508,8 +509,11 @@ function ChatApp() {
                   className="primary-button full-width"
                   disabled={quizAnswers[quizIndex] === undefined}
                   onClick={() => {
-                    if (quizIndex < activeQuiz.length - 1) setQuizIndex((current) => current + 1)
-                    else setQuizAnswers((current) => [...current])
+                    if (quizIndex < activeQuiz.length - 1) {
+                      setQuizIndex((current) => current + 1)
+                    } else {
+                      setQuizAnswers((current) => [...current])
+                    }
                   }}
                 >
                   {quizIndex < activeQuiz.length - 1 ? 'Weiter' : 'Auswerten'}

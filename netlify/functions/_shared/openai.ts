@@ -39,8 +39,6 @@ const chatPackageSchema = {
     },
     quiz: {
       type: 'array',
-      minItems: 3,
-      maxItems: 3,
       items: {
         type: 'object',
         additionalProperties: false,
@@ -49,11 +47,10 @@ const chatPackageSchema = {
           question: { type: 'string' },
           answers: {
             type: 'array',
-            minItems: 3,
-            maxItems: 3,
+            minItems: 2,
             items: { type: 'string' },
           },
-          correctAnswerIndex: { type: 'integer', minimum: 0, maximum: 2 },
+          correctAnswerIndex: { type: 'integer', minimum: 0 },
         },
       },
     },
